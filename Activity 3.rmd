@@ -1,0 +1,163 @@
+---
+title: "Activity 3"
+author: "Aidan Harrington"
+date: "9/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+Question 1)
+At high humidity and low temperature, high humidity and high temperature, low humidity and low temperature and low humididty and high temperature, there is more uncertainty in the measurements. The uncertainty in the instrument is minimized between 10 and 70 degrees C and between 15-90% relative humidity. Values outside of these ranges result in more uncertainty. 
+
+Question 2)
+The ATMOS 41 will reject a wind speed measurement that is 8x greater than the running average over the last ten measurements, taken every ten seconds. This prevents spikes in wind speed from random events being recorded (the provided example is a bumblebee hanging out in the sensor). However, in cases where unpredictable large increases in wind speed might be common or possible, this may result in the sensor falsely marking that as an erroneous measurement. 
+
+```{r}
+# Preparing the data
+datW<-read.csv("data/bewkes_weather.csv",na.strings = c("#N/A"),skip=3,header=F)
+print(datW)
+sensorInfo<-read.csv("data/bewkes_weather.csv",na.strings = c("#N/A"),nrows=2)
+colnames(datW)<-colnames(sensorInfo)
+```
+
+Question 3)
+Skip tells R to ignore the specified number of rows. Skip=3 means that the first three rows will not be included in the dataframe. Nrows tells R to only include the specified number of rows, nrows=2 includes only the first two rows of the csv in the dataframe. Header=false tells R not to use the firs row of the csv files as the column names. 
+
+```{r, message=FALSE}
+# Loading in the package
+library(lubridate)
+
+# Standardizing date formats
+dates<-mdy_hm(datW$timestamp,tz="America/New_York")
+datW$doy<-yday(dates)
+datW$hour<-hour(dates)+(minute(dates)/60)
+datW$DD<-datW$doy+(datW$hour/24)
+
+# Check for missing values with a function
+na.chek<- function(x) is.na(x) %>% which() %>% length()
+na.chek(datW$air.temperature)
+na.chek(datW$wind.speed)
+na.chek(datW$precipitation)
+na.chek(datW$soil.temp)
+na.chek(datW$soil.moisture)
+
+# Plotting data for QA/QC
+plot(datW$DD,datW$soil.moisture,pch=19,type="b",xlab="Day of Year",ylab="Soil moisture (cm3 water per cm3 soil")
+
+plot(datW$DD,datW$air.temperature,pch=19,type="b",xlab="Day of Year",ylab="Air Temperature (degrees C)")
+
+#Realistic Values
+datW$air.tempQ1 <- ifelse(datW$air.temperature < 0, NA, datW$air.temperature)
+quantile(datW$air.tempQ1)
+
+#Highs and lows in temperature
+datW[datW$air.tempQ1<8,]
+datW[datW$air.tempQ1>33,]
+
+```
+
+Question 4)
+The few random readings from the high and low values that I chose to cross-check with the nearest weather station were reasonably close. Considering that the nearest station is in Rome, NY, any minor differences between the Bewkes and there are hardly grounds to question the instrument. 
+
+
+```{r}
+#plot precipitation and lightning strikes on the same plot
+#normalize lighting strikes to match precipitation
+lightscale <- (max(datW$precipitation)/max(datW$lightning.acvitivy)) * datW$lightning.acvitivy
+
+#make the plot with precipitation and lightning activity marked
+#make it empty to start and add in features
+plot(datW$DD , datW$precipitation, xlab = "Day of Year", ylab = "Precipitation & lightning",
+        type="n")
+#plot precipitation points only when there is precipitation 
+#make the points semi-transparent
+points(datW$DD[datW$precipitation > 0], datW$precipitation[datW$precipitation > 0],
+        col= rgb(95/255,158/255,160/255,.5), pch=15)        
+        
+#plot lightning points only when there is lightning     
+points(datW$DD[lightscale > 0], lightscale[lightscale > 0],
+        col= "tomato3", pch=19)
+```
+
+Question 5) 
+You can use "lightscale" to subset in "datW" because lightscale is a vector of the same length as datW and each row corresponds to the measurements it was calculated from. The code below shows that this is the case. 
+
+```{r}
+#The function here returns whatever the second statement is if the first is false.
+#Ive modififed the function to return true statements
+#In this case, the lengths of the two vectors are the same, so the function returns the assigned message. 
+assert.true<-function(statement,message){if(statement == TRUE){print(message)}}
+assert(length(lightscale)==length(datW),"Equal length")
+```
+
+```{r}
+#filter out storms in wind and air temperature measurements (using lightning and rain as proxy)
+#filter out values with lightning that coincides with rainfall greater than 2mm or only rainfall over 5 mm.    
+#create a new air temp column
+datW$air.tempQ2 <- ifelse(datW$precipitation  >= 2 & datW$lightning.acvitivy >0, NA,
+                    ifelse(datW$precipitation > 5, NA, datW$air.tempQ1))
+```
+
+Question 6)
+The code below excludes the same thirteen rows of data as the filter done above on air temperature. The result is that we now have two new columns for air temperature and wind speed that have put NA values in place of the measurements that occurred on very rainy and stormy days. The assert.true function below returns "Same measurements removed" if the measurements selected for removal are actually the same, which was done by matching their timestamps. 
+
+```{r,message=FALSE}
+#same criteria as before but filtering out the wind values now
+datW$wind.speedQ2 <- ifelse(datW$precipitation  >= 2 & datW$lightning.acvitivy >0, NA,
+                    ifelse(datW$precipitation > 5, NA, datW$wind.speed))
+
+#To check if this did what I wanted, I should see if the day and time of removed values is the same
+#in both variables. I select the timestamps from the new air and wind columns where they have NA's and ask if they are
+#identicial. As the assigned statement is returned, we know that the timestamps of the removed values were identical 
+assert.true(identical(select(filter(datW,is.na(datW$air.tempQ2==TRUE)),timestamp),select(filter(datW,is.na(datW$wind.speedQ2==TRUE)),timestamp)),"Same Measurements Removed")
+
+#New plot of wind speed without the stormy days included
+plot(datW$DD, datW$wind.speedQ2, pch=19, type="b", xlab = "Day of Year",
+     ylab="Wind Speed (m/s)")
+```
+
+Question 7)
+The plot coded below shows that there is not an obvious reason for the sensor malfunction. We see that the sensor consistently responds to rainfall (the blue lines) with significant increases in soil moisture. In the days leading up to the malfunction there had been virtually no rain of appreciable amounts (greater than 0.2 mm), while all other days that saw an uptick in soil moisture were accompanied by rain above that cutoff. Furthermore, readings as low as we see around 190 days are probably not spurious considering they are in a similar range to values measured before the first recorded rain event on the plot. The resolution of the meter is 0.0008 VWC, which is far lower than where the measurements stopped. Storm damage also is not likely considering that notable winds occurred on days 183 and 198, which are not the day in question. Some other reason is responsible for sensor malfunction, but it appears that the measurements were accurate up until that point.
+
+```{r}
+plot(datW$DD,datW$soil.moisture,xlab = "Day of Year",ylab="Soil Moisture (VWC)",sub = "Blue lines indicate days with any precipitation")
+abline(v=c(datW$DD[datW$precipitation > 0.2]),lwd=1,col=rgb(0, 0, 255, max = 255, alpha = 50))
+points(datW$air.temperature[datW$air.temperature>25],datW$air.temperature[datW$air.temperature>25],type = "p",col="red")
+```
+
+Question 8)
+All code for the table shown below. Vectors for each part of the table are made individually and joined together with dataframe. The measurements are followed by the actual value and their uncertainty. The number of decimals may exceed the signficant figures despite my best efforts, R wants to add zeroes everywhere. Unertainties are displayed in the next column, followed by the number of samples and the start and end date of measurements. Sample sizes for the first two measures exclude the erroneous measurements made on stormy days, and the missing data from the soil probe. 
+
+```{r}
+Measurement<-c("Mean Air Temperature (C)","Mean Wind Speed (m/s)","Mean Soil Moisture (VWC)","Mean Soil Temperature (C)",
+               "Total Precipitation (mm)")
+Value<-c(signif(mean(datW$air.tempQ2,na.rm=T),3),signif(mean(datW$wind.speedQ2,na.rm = T),2),
+                     signif(mean(datW$soil.moisture,na.rm=T),2),signif(mean(datW$soil.temp,na.rm=T),2),sum(datW$precipitation))
+Uncertainty<-c(0.6,0.3,0.03,1,signif(sum(rain.error),4))
+Sample_Size<-c(length(datW$air.tempQ2)-na.chek(datW$air.tempQ2),length(datW$wind.speedQ2)-na.chek(datW$wind.speedQ2),
+                  length(datW$soil.moisture)-na.chek(datW$soil.moisture),length(datW$soil.temp)-na.chek(datW$soil.temp),
+                  length(datW$precipitation)-na.chek(datW$precipitation))
+Measurement_Start<-c("6/12/2018 11:30","6/12/2018 11:30","6/12/2018 11:30","6/12/2018 11:30","6/12/2018 11:30")
+Measurement_End<-c("7/26/2018 14:00","7/26/2018 14:00","7/11/2018 21:00","7/11/2018 21:00","7/26/2018 14:00")
+Summary_Table<-data.frame(Measurement,Value,Uncertainty,Sample_Size,Measurement_Start,Measurement_End)
+
+print(Summary_Table)
+```
+
+Question 9)
+The plots show a number of trends in these four vairables. Soil and air temperature are very closely correlated in the same direction. The air is warmer, but the soil follows it closely. Spikes in soil moisture occur whenever there is precipitation, for obvious reasons, but dries out quickly. Large dips in soil temperature are also associated with instances of rainfall. Other interesting trends during the study period include the relative consistency of rain every few days, predictable daily fluctuations in soil and air temperatures, and the speed at which soil appears to dry out. 
+
+```{r}
+plot(datW$DD,datW$soil.moisture,xlab="Day of Year",ylab="Soil Moisture (VWC)")
+plot(datW$DD,datW$air.temperature,xlab="Day of Year",ylab="Air Temperature (C)")
+plot(datW$DD,datW$soil.temp,xlab="Day of Year",ylab="Soil Temperature (C)")
+plot(datW$DD[datW$precipitation>0],datW$precipitation[datW$precipitation>0],xlab="Day of Year",ylab="Precipitation (mm)")
+```
+
+
+
+
